@@ -79,10 +79,10 @@ fn register_global_subscriber() {
             dataset: "dag-cache".to_string(), // FIXME: rename if copying this example
             ..libhoney::client::Options::default()
         },
-        transmission_options: libhoney::transmission::Options::default(),
+        transmission_options: libhoney::SenderOptions::default(),
     };
 
-    let telemetry_layer = new_honeycomb_telemetry_layer("async-tracing_example", honeycomb_config);
+    let telemetry_layer = new_honeycomb_telemetry_layer("async-tracing_example", honeycomb_config).unwrap();
 
     let subscriber = registry::Registry::default() // provide underlying span data store
         .with(LevelFilter::INFO) // filter out low-level debug tracing (eg tokio executor)

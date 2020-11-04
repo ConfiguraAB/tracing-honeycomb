@@ -14,8 +14,9 @@
 mod honeycomb;
 mod visitor;
 
-pub use crate::honeycomb::{HoneycombTelemetry, SpanId, TraceId};
+pub use crate::honeycomb::{FlushGuard, HoneycombTelemetry, SpanId, TraceId};
 pub use crate::visitor::HoneycombVisitor;
+use libhoney::{transmission::HoneycombSender, Sender};
 use rand::{self, Rng};
 #[doc(no_inline)]
 pub use tracing_distributed::{TelemetryLayer, TraceCtxError};
@@ -62,16 +63,16 @@ pub fn new_blackhole_telemetry_layer(
 pub fn new_honeycomb_telemetry_layer(
     service_name: &'static str,
     honeycomb_config: libhoney::Config,
-) -> TelemetryLayer<HoneycombTelemetry, SpanId, TraceId> {
+) -> Result<TelemetryLayer<HoneycombTelemetry<HoneycombSender>, SpanId, TraceId>, libhoney::Error> {
     let instance_id: u64 = rand::thread_rng().gen();
-    TelemetryLayer::new(
+    Ok(TelemetryLayer::new(
         service_name,
-        HoneycombTelemetry::new(honeycomb_config, None),
+        HoneycombTelemetry::new(honeycomb_config, None)?,
         move |tracing_id| SpanId {
             instance_id,
             tracing_id,
         },
-    )
+    ))
 }
 
 /// Construct a TelemetryLayer that publishes telemetry to honeycomb.io using the
@@ -93,14 +94,44 @@ pub fn new_honeycomb_telemetry_layer_with_trace_sampling(
     service_name: &'static str,
     honeycomb_config: libhoney::Config,
     sample_rate: u128,
-) -> TelemetryLayer<HoneycombTelemetry, SpanId, TraceId> {
+) -> Result<TelemetryLayer<HoneycombTelemetry<HoneycombSender>, SpanId, TraceId>, libhoney::Error> {
     let instance_id: u64 = rand::thread_rng().gen();
-    TelemetryLayer::new(
+    Ok(TelemetryLayer::new(
         service_name,
-        HoneycombTelemetry::new(honeycomb_config, Some(sample_rate)),
+        HoneycombTelemetry::new(honeycomb_config, Some(sample_rate))?,
         move |tracing_id| SpanId {
             instance_id,
             tracing_id,
         },
-    )
+    ))
+}
+
+/// Construct a TelemetryLayer that publishes telemetry to honeycomb.io using the provided honeycomb config.
+///
+/// Specialized to the honeycomb.io-specific SpanId and TraceId provided by this crate.
+///
+/// Dropping the flush guard will wait for the data to be sent to Honeycomb
+pub fn new_honeycomb_telemetry_layer_with_sender_and_flush_guard<S: Sender + Send>(
+    service_name: &'static str,
+    honeycomb_config: libhoney::Config,
+    sample_rate: u128,
+    sender: S,
+) -> Result<
+    (
+        TelemetryLayer<HoneycombTelemetry<S>, SpanId, TraceId>,
+        FlushGuard<S>,
+    ),
+    libhoney::Error,
+> {
+    let instance_id: u64 = rand::thread_rng().gen();
+    let telemetry = HoneycombTelemetry::new_with_sender(honeycomb_config, Some(sample_rate), sender)?;
+    let flush_guard = telemetry.flush_on_drop();
+
+    Ok((
+        TelemetryLayer::new(service_name, telemetry, move |tracing_id| SpanId {
+            instance_id,
+            tracing_id,
+        }),
+        flush_guard,
+    ))
 }

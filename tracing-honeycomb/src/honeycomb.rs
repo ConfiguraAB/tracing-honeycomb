@@ -1,7 +1,12 @@
 use crate::visitor::{event_to_values, span_to_values, HoneycombVisitor};
-use libhoney::FieldHolder;
+use libhoney::{
+    transmission::{HoneycombSender, Transmission},
+    Sender,
+};
+use libhoney::{Error, FieldHolder};
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::Arc;
 use tracing_distributed::{Event, Span, Telemetry};
 
 #[cfg(feature = "use_parking_lot")]
@@ -11,22 +16,37 @@ use std::sync::Mutex;
 
 /// Telemetry capability that publishes events and spans to Honeycomb.io.
 #[derive(Debug)]
-pub struct HoneycombTelemetry {
-    honeycomb_client: Mutex<libhoney::Client<libhoney::transmission::Transmission>>,
+pub struct HoneycombTelemetry<S: Sender + Send> {
+    honeycomb_client: Arc<Mutex<libhoney::Client<Transmission<S>>>>,
     sample_rate: Option<u128>,
 }
 
-impl HoneycombTelemetry {
-    pub(crate) fn new(cfg: libhoney::Config, sample_rate: Option<u128>) -> Self {
-        let honeycomb_client = libhoney::init(cfg);
+impl HoneycombTelemetry<HoneycombSender> {
+    pub(crate) fn new(cfg: libhoney::Config, sample_rate: Option<u128>) -> Result<Self, Error> {
+        let honeycomb_client = libhoney::init(cfg)?;
 
         // publishing requires &mut so just mutex-wrap it
         // FIXME: may not be performant, investigate options (eg mpsc)
-        let honeycomb_client = Mutex::new(honeycomb_client);
+        let honeycomb_client = Arc::new(Mutex::new(honeycomb_client));
 
-        HoneycombTelemetry {
-            honeycomb_client,
-            sample_rate,
+        Ok(HoneycombTelemetry { honeycomb_client, sample_rate })
+    }
+}
+
+impl<S: Sender + Send> HoneycombTelemetry<S> {
+    pub(crate) fn new_with_sender(cfg: libhoney::Config, sample_rate: Option<u128>, sender: S) -> Result<Self, Error> {
+        let honeycomb_client = libhoney::init_with_sender(cfg, sender)?;
+
+        // publishing requires &mut so just mutex-wrap it
+        // FIXME: may not be performant, investigate options (eg mpsc)
+        let honeycomb_client = Arc::new(Mutex::new(honeycomb_client));
+
+        Ok(HoneycombTelemetry { honeycomb_client, sample_rate })
+    }
+
+    pub(crate) fn flush_on_drop(&self) -> FlushGuard<S> {
+        FlushGuard {
+            honeycomb_client: Arc::clone(&self.honeycomb_client),
         }
     }
 
@@ -55,7 +75,7 @@ impl HoneycombTelemetry {
     }
 }
 
-impl Telemetry for HoneycombTelemetry {
+impl<S: Sender + Send> Telemetry for HoneycombTelemetry<S> {
     type Visitor = HoneycombVisitor;
     type TraceId = TraceId;
     type SpanId = SpanId;
@@ -75,6 +95,40 @@ impl Telemetry for HoneycombTelemetry {
         if self.should_report(event.trace_id) {
             let data = event_to_values(event);
             self.report_data(data);
+        }
+    }
+}
+
+/// Guard that waits for data to be sent to Honeycomb on drop
+#[derive(Debug)]
+pub struct FlushGuard<S: Sender + Send> {
+    honeycomb_client: Arc<Mutex<libhoney::Client<Transmission<S>>>>,
+}
+
+/// Guard that waits for data to be sent to Honeycomb on drop
+impl<S: Sender + Send> std::clone::Clone for FlushGuard<S> {
+    fn clone(&self) -> Self {
+        Self {
+            honeycomb_client: Arc::clone(&self.honeycomb_client),
+        }
+    }
+}
+
+impl<S: Sender + Send> std::ops::Drop for FlushGuard<S> {
+    fn drop(&mut self) {
+        let mut guard = match self.honeycomb_client.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                if !std::thread::panicking() {
+                    panic!("{}", e);
+                } else {
+                    return;
+                }
+            }
+        };
+
+        if let Err(e) = guard.flush() {
+            eprintln!("Failed to flush to honeycomb: {}", e)
         }
     }
 }
