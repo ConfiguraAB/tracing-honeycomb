@@ -1,6 +1,6 @@
 use crate::visitor::{event_to_values, span_to_values, HoneycombVisitor};
 use libhoney::FieldHolder;
-use std::collections::HashMap;
+use std::{collections::HashMap};
 use std::str::FromStr;
 use tracing_distributed::{Event, Span, Telemetry};
 
@@ -94,8 +94,8 @@ impl HoneycombStdoutTelemetry {
     }
 
     fn report_data(&self, data: HashMap<String, ::libhoney::Value>) {
-        if let Ok(data) = serde_json::to_vec(&data) {
-            let _ = std::io::Write::write_all(&mut std::io::stdout(), data.as_slice());
+        if let Ok(data) = serde_json::to_string(&data) {
+            println!("{}", data);
         }
     }
 
