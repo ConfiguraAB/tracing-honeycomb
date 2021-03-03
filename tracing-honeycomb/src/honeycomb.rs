@@ -1,5 +1,5 @@
 use crate::visitor::{event_to_values, span_to_values, HoneycombVisitor};
-use libhoney::FieldHolder;
+// use libhoney::FieldHolder;
 use std::collections::HashMap;
 use std::str::FromStr;
 use tracing_distributed::{Event, Span, Telemetry};
@@ -32,19 +32,24 @@ impl HoneycombTelemetry {
 
     fn report_data(&self, data: HashMap<String, ::libhoney::Value>) {
         // succeed or die. failure is unrecoverable (mutex poisoned)
-        #[cfg(not(feature = "use_parking_lot"))]
-        let mut client = self.honeycomb_client.lock().unwrap();
-        #[cfg(feature = "use_parking_lot")]
-        let mut client = self.honeycomb_client.lock();
+        // #[cfg(not(feature = "use_parking_lot"))]
+        // let mut client = self.honeycomb_client.lock().unwrap();
+        // #[cfg(feature = "use_parking_lot")]
+        // let mut client = self.honeycomb_client.lock();
 
-        let mut ev = client.new_event();
-        ev.add(data);
-        let res = ev.send(&mut client);
-        if let Err(err) = res {
-            // unable to report telemetry (buffer full) so log msg to stderr
-            // TODO: figure out strategy for handling this (eg report data loss event)
-            eprintln!("error sending event to honeycomb, {:?}", err);
-        }
+        // println!("##########");
+        // for (_, v) in data {
+            // let _ = std::io::Write::write_all(&mut std::io::stdout(), v.to_string().as_bytes());
+        // }
+        println!("{:?}", data);
+        // let mut ev = client.new_event();
+        // ev.add(data);
+        // let res = ev.send(&mut client);
+        // if let Err(err) = res {
+        //     // unable to report telemetry (buffer full) so log msg to stderr
+        //     // TODO: figure out strategy for handling this (eg report data loss event)
+        //     eprintln!("error sending event to honeycomb, {:?}", err);
+        // }
     }
 
     fn should_report(&self, trace_id: TraceId) -> bool {
