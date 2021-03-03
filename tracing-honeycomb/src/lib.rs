@@ -16,6 +16,7 @@ mod visitor;
 
 pub use crate::honeycomb::{HoneycombTelemetry, SpanId, TraceId};
 pub use crate::visitor::HoneycombVisitor;
+use honeycomb::HoneycombStdoutTelemetry;
 use rand::{self, Rng};
 #[doc(no_inline)]
 pub use tracing_distributed::{TelemetryLayer, TraceCtxError};
@@ -55,6 +56,25 @@ pub fn new_blackhole_telemetry_layer(
         },
     )
 }
+
+/// Construct a TelemetryLayer that publishes telemetry to stdout in JSON format.
+/// The output is intended to be interpreted by honeycomb's AWS lambda layer.
+///
+/// Specialized to the honeycomb.io-specific SpanId and TraceId provided by this crate.
+pub fn new_honeycomb_stdout_telemetry_layer(
+    service_name: &'static str,
+) -> TelemetryLayer<HoneycombStdoutTelemetry, SpanId, TraceId> {
+    let instance_id: u64 = 0;
+    TelemetryLayer::new(
+        service_name,
+        HoneycombStdoutTelemetry::new(None),
+        move |tracing_id| SpanId {
+            instance_id,
+            tracing_id,
+        },
+    )
+}
+
 
 /// Construct a TelemetryLayer that publishes telemetry to honeycomb.io using the provided honeycomb config.
 ///
